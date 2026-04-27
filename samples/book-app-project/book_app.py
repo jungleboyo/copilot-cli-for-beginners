@@ -1,97 +1,132 @@
+"""Command-line interface for the Book Collection sample app.
+
+Refactored to use argparse, dependency injection, input validation, and
+clear exit codes so it's testable and clean.
+"""
+from __future__ import annotations
+
+import argparse
 import sys
-from books import BookCollection
+from typing import Optional
+
+from books import BookCollection, Book
 
 
-# Global collection instance
-collection = BookCollection()
+def create_parser() -> argparse.ArgumentParser:
+    """Create argument parser with subcommands."""
+    parser = argparse.ArgumentParser(prog="book_app", description="Book Collection Helper")
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("list", help="Show all books")
+
+    add = sub.add_parser("add", help="Add a new book")
+    add.add_argument("--title", help="Book title")
+    add.add_argument("--author", help="Book author")
+    add.add_argument("--year", type=int, help="Publication year")
+
+    rm = sub.add_parser("remove", help="Remove a book by title")
+    rm.add_argument("--title", required=True, help="Title of the book to remove")
+
+    find = sub.add_parser("find", help="Find books by author")
+    find.add_argument("--author", required=True, help="Author name to search for")
+
+    return parser
 
 
-def show_books(books):
-    """Display books in a user-friendly format."""
+def show_books(books: list[Book]) -> None:
+    """Print a list of books in a friendly format."""
     if not books:
         print("No books found.")
         return
 
     print("\nYour Book Collection:\n")
-
     for index, book in enumerate(books, start=1):
         status = "✓" if book.read else " "
         print(f"{index}. [{status}] {book.title} by {book.author} ({book.year})")
-
     print()
 
 
-def handle_list():
-    books = collection.list_books()
+def validate_non_empty(value: Optional[str], field_name: str) -> str:
+    """Ensure a string value is not empty; raise ValueError if it is."""
+    if not value or not value.strip():
+        raise ValueError(f"{field_name} is required")
+    return value.strip()
+
+
+def handle_add(args: argparse.Namespace, collection: BookCollection) -> int:
+    """Handle the add command. Returns exit code."""
+    try:
+        title = validate_non_empty(args.title, "Title")
+        author = validate_non_empty(args.author, "Author")
+        if args.year is None:
+            raise ValueError("Year is required")
+        year = args.year
+        if year < 0 or year > 2100:
+            raise ValueError("Year must be between 0 and 2100")
+
+        collection.add_book(title, author, year)
+        print("Book added successfully.")
+        return 0
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 2
+
+
+def handle_list(args: argparse.Namespace, collection: BookCollection) -> int:
+    show_books(collection.list_books())
+    return 0
+
+
+def handle_remove(args: argparse.Namespace, collection: BookCollection) -> int:
+    removed = collection.remove_book(args.title)
+    if removed:
+        print("Book removed.")
+        return 0
+    else:
+        print("Book not found.")
+        return 1
+
+
+def handle_find(args: argparse.Namespace, collection: BookCollection) -> int:
+    books = collection.find_by_author(args.author)
     show_books(books)
+    return 0
 
 
-def handle_add():
-    print("\nAdd a New Book\n")
+def run(args: Optional[list[str]] = None, collection: Optional[BookCollection] = None) -> int:
+    """Entry point for the CLI. Returns an exit code for testing.
 
-    title = input("Title: ").strip()
-    author = input("Author: ").strip()
-    year_str = input("Year: ").strip()
+    Args:
+        args: List of command-line arguments (defaults to sys.argv[1:]).
+        collection: Optional BookCollection to operate on (for testing).
+    """
+    parser = create_parser()
+    parsed = parser.parse_args(args=args)
+
+    if collection is None:
+        collection = BookCollection()
 
     try:
-        year = int(year_str) if year_str else 0
-        collection.add_book(title, author, year)
-        print("\nBook added successfully.\n")
-    except ValueError as e:
-        print(f"\nError: {e}\n")
+        if parsed.command == "add":
+            return handle_add(parsed, collection)
+        if parsed.command == "list":
+            return handle_list(parsed, collection)
+        if parsed.command == "remove":
+            return handle_remove(parsed, collection)
+        if parsed.command == "find":
+            return handle_find(parsed, collection)
+
+        parser.print_help()
+        return 0
+    except (KeyboardInterrupt, EOFError):
+        print("\nOperation cancelled by user.")
+        return 130
 
 
-def handle_remove():
-    print("\nRemove a Book\n")
-
-    title = input("Enter the title of the book to remove: ").strip()
-    collection.remove_book(title)
-
-    print("\nBook removed if it existed.\n")
-
-
-def handle_find():
-    print("\nFind Books by Author\n")
-
-    author = input("Author name: ").strip()
-    books = collection.find_by_author(author)
-
-    show_books(books)
-
-
-def show_help():
-    print("""
-Book Collection Helper
-
-Commands:
-  list     - Show all books
-  add      - Add a new book
-  remove   - Remove a book by title
-  find     - Find books by author
-  help     - Show this help message
-""")
-
-
-def main():
-    if len(sys.argv) < 2:
-        show_help()
-        return
-
-    command = sys.argv[1].lower()
-
-    if command == "list":
-        handle_list()
-    elif command == "add":
-        handle_add()
-    elif command == "remove":
-        handle_remove()
-    elif command == "find":
-        handle_find()
-    elif command == "help":
-        show_help()
-    else:
-        print("Unknown command.\n")
-        show_help()
+def main() -> None:
+    """Run CLI and exit with appropriate code."""
+    exit_code = run(args=None)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
